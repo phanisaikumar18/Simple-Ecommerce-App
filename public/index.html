@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simple E-commerce</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #f0f0f0; }
+    .box, .product, .cart-item, .order-item { background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 5px; box-shadow: 0 2px 8px #0001; }
+    input, select, button { margin: 5px; padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
+    button { background: #1976d2; color: #fff; border: none; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #125ea2; }
+    #logoutBtn { float: right; background-color: crimson; color: white; }
+    .admin-only { display: none; }
+    .feedback { color: #1976d2; margin: 5px 0; font-weight: bold; }
+    .error { color: crimson; }
+    .success { color: green; }
+    .loading { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h2>🛍️ Simple E-commerce</h2>
+  <button id="logoutBtn" onclick="logout()">Logout</button>
+
+  <!-- Registration -->
+  <div class="box">
+    <h3>Register</h3>
+    <input id="regName" placeholder="Name" />
+    <input id="regEmail" placeholder="Email" />
+    <input id="regPassword" placeholder="Password" type="password" />
+    <select id="regRole">
+      <option value="customer">Customer</option>
+      <option value="admin">Admin</option>
+    </select>
+    <button onclick="register()">Register</button>
+    <div id="regFeedback" class="feedback"></div>
+  </div>
+
+  <!-- Login -->
+  <div class="box">
+    <h3>Login</h3>
+    <input id="loginEmail" placeholder="Email" />
+    <input id="loginPassword" placeholder="Password" type="password" />
+    <button onclick="login()">Login</button>
+    <div id="loginFeedback" class="feedback"></div>
+  </div>
+<select id="sortSelect" onchange="loadProducts()">
+  <option value="">-- Sort By --</option>
+  <option value="price_asc">Price ↑</option>
+  <option value="price_desc">Price ↓</option>
+  <option value="newest">Newest</option>
+</select>
+  <!-- Product Search -->
+  <div class="box">
+    <h3>Search Products</h3>
+    <input id="searchName" placeholder="Name" />
+    <input id="searchCategory" placeholder="Category" />
+    <button onclick="loadProducts()">Search</button>
+    <span id="productLoading" class="loading"></span>
+    <div id="productList"></div>
+  </div>
+
+  <!-- Admin Panel -->
+  <div class="box admin-only" id="adminPanel">
+    <h3>Add Product</h3>
+    <input id="pName" placeholder="Name" />
+    <input id="pDesc" placeholder="Description" />
+    <input id="pPrice" placeholder="Price" type="number" />
+    <input id="pCategory" placeholder="Category" />
+    <input id="pStock" placeholder="Stock" type="number" />
+    <button onclick="addProduct()">Add Product</button>
+    <div id="adminFeedback" class="feedback"></div>
+  </div>
+
+  <!-- Cart -->
+  <div class="box">
+    <h3>Cart</h3>
+    <button onclick="loadCart()">View Cart</button>
+    <span id="cartLoading" class="loading"></span>
+    <div id="cartList"></div>
+    <button onclick="placeOrder()">Place Order</button>
+    <div id="cartFeedback" class="feedback"></div>
+  </div>
+
+  <!-- Order History -->
+  <div class="box">
+    <h3>Order History</h3>
+    <button onclick="loadOrders()">View Orders</button>
+    <span id="orderLoading" class="loading"></span>
+    <div id="orderHistory"></div>
+  </div>
+
+  <script>
+    let token = localStorage.getItem('token') || '';
+    let role = localStorage.getItem('role') || '';
+
+    function register() {
+      document.getElementById('regFeedback').innerText = 'Registering...';
+      fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: document.getElementById('regName').value,
+          email: document.getElementById('regEmail').value,
+          password: document.getElementById('regPassword').value,
+          role: document.getElementById('regRole').value
+        })
+      })
+      .then(res => res.json())
+      .then(d => {
+        document.getElementById('regFeedback').innerText = d.message || JSON.stringify(d);
+        document.getElementById('regFeedback').className = 'feedback ' + (d.message && d.message.startsWith('✅') ? 'success' : 'error');
+      })
+      .catch(() => {
+        document.getElementById('regFeedback').innerText = 'Registration failed.';
+        document.getElementById('regFeedback').className = 'feedback error';
+      });
+    }
+
+    function login() {
+      document.getElementById('loginFeedback').innerText = 'Logging in...';
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: document.getElementById('loginEmail').value,
+          password: document.getElementById('loginPassword').value
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.token) {
+          token = data.token;
+          role = data.user.role;
+          localStorage.setItem('token', token);
+          localStorage.setItem('role', role);
+          document.getElementById('loginFeedback').innerText = 'Login successful!';
+          document.getElementById('loginFeedback').className = 'feedback success';
+          if (role === 'admin') document.getElementById('adminPanel').style.display = 'block';
+        } else {
+          document.getElementById('loginFeedback').innerText = data.message || 'Login failed.';
+          document.getElementById('loginFeedback').className = 'feedback error';
+        }
+      })
+      .catch(() => {
+        document.getElementById('loginFeedback').innerText = 'Login failed.';
+        document.getElementById('loginFeedback').className = 'feedback error';
+      });
+    }
+
+    function logout() {
+      token = '';
+      role = '';
+      localStorage.clear();
+      alert('Logged out');
+      location.reload();
+    }
+
+    function loadProducts() {
+      document.getElementById('productLoading').innerText = 'Loading...';
+      const name = document.getElementById('searchName').value;
+      const category = document.getElementById('searchCategory').value;
+      let url = '/api/products';
+      const params = [];
+      if (name) params.push(`name=${encodeURIComponent(name)}`);
+      if (category) params.push(`category=${encodeURIComponent(category)}`);
+      if (params.length) url += '?' + params.join('&');
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('productLoading').innerText = '';
+          if (Array.isArray(data.products)) {
+            document.getElementById('productList').innerHTML = data.products.map(p => `
+              <div class="product">
+                <b>${p.name}</b><br>
+                ${p.description}<br>
+                ₹${p.price} | ${p.category} | Stock: ${p.stock}
+                <br><input type="number" id="qty-${p.id}" value="1" min="1" />
+                <button onclick="addToCart(${p.id})">Add to Cart</button>
+                ${role === 'admin' ? `
+                  <br>
+                  <input id="edit-name-${p.id}" value="${p.name}" />
+                  <input id="edit-price-${p.id}" value="${p.price}" />
+                  <input id="edit-stock-${p.id}" value="${p.stock}" />
+                  <button onclick="updateProduct(${p.id})">Update</button>
+                  <button onclick="deleteProduct(${p.id})">Delete</button>
+                ` : ''}
+              </div>
+            `).join('');
+          } else {
+            document.getElementById('productList').innerText = JSON.stringify(data);
+          }
+        })
+        .catch(() => {
+          document.getElementById('productLoading').innerText = '';
+          document.getElementById('productList').innerText = 'Failed to load products.';
+        });
+    }
+
+    function addProduct() {
+      document.getElementById('adminFeedback').innerText = 'Adding product...';
+      fetch('/api/products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token
+        },
+        body: JSON.stringify({
+          name: document.getElementById('pName').value,
+          description: document.getElementById('pDesc').value,
+          price: document.getElementById('pPrice').value,
+          category: document.getElementById('pCategory').value,
+          stock: document.getElementById('pStock').value
+        })
+      })
+      .then(res => res.json())
+      .then(d => {
+        document.getElementById('adminFeedback').innerText = d.message || JSON.stringify(d);
+        document.getElementById('adminFeedback').className = 'feedback ' + (d.message && d.message.startsWith('Product added') ? 'success' : 'error');
+      })
+      .catch(() => {
+        document.getElementById('adminFeedback').innerText = 'Failed to add product.';
+        document.getElementById('adminFeedback').className = 'feedback error';
+      });
+    }
+   function addToCart(productId) {
+  const qty = document.getElementById(`qty-${productId}`).value;
+  fetch('/api/cart/add', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token
+    },
+    body: JSON.stringify({ product_id: productId, quantity: qty })
+  }).then(res => res.text()).then(alert);
+}
+
+    function updateProduct(id) {
+      fetch(`/api/products/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token
+        },
+        body: JSON.stringify({
+          name: document.getElementById(`edit-name-${id}`).value,
+          price: document.getElementById(`edit-price-${id}`).value,
+          stock: document.getElementById(`edit-stock-${id}`).value
+        })
+      }).then(res => res.text()).then(alert);
+    }
+
+    function deleteProduct(id) {
+      fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: token }
+      }).then(res => res.text()).then(alert);
+    }
+
+    function addToCart(productId) {
+      const qty = document.getElementById(`qty-${productId}`).value;
+      fetch('/api/cart/add', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token
+        },
+        body: JSON.stringify({ product_id: productId, quantity: qty })
+      }).then(res => res.text()).then(alert);
+    }
+
+    function loadCart() {
+      fetch('/api/cart', {
+        headers: { Authorization: token }
+      }).then(res => res.json()).then(data => {
+        const list = data.map(item => `
+          <div class="cart-item">
+            ${item.name} x ${item.quantity} = ₹${item.total}
+            <br><input type="number" id="update-${item.id}" value="${item.quantity}" />
+            <button onclick="updateCart(${item.id}, ${item.product_id})">Update</button>
+            <button onclick="removeFromCart(${item.product_id})">Remove</button>
+          </div>
+        `).join('');
+        document.getElementById('cartList').innerHTML = list || 'Cart is empty';
+      });
+    }
+
+    function updateCart(cartId, productId) {
+      const quantity = document.getElementById(`update-${cartId}`).value;
+      fetch('/api/cart/update', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token
+        },
+        body: JSON.stringify({ product_id: productId, quantity })
+      }).then(res => res.text()).then(alert);
+    }
+
+    function removeFromCart(productId) {
+      fetch(`/api/cart/remove/${productId}`, {
+        method: 'DELETE',
+        headers: { Authorization: token }
+      }).then(res => res.text()).then(alert);
+    }
+
+    function placeOrder() {
+      fetch('/api/orders/create', {
+        method: 'POST',
+        headers: { Authorization: token }
+      }).then(res => res.text()).then(alert);
+    }
+
+    function loadOrders() {
+      fetch('/api/orders/history', {
+        headers: { Authorization: token }
+      }).then(res => res.json()).then(data => {
+        if (!data.length) return document.getElementById('orderHistory').innerText = 'No orders found.';
+        const grouped = {};
+        data.forEach(o => {
+          if (!grouped[o.order_id]) grouped[o.order_id] = [];
+          grouped[o.order_id].push(o);
+        });
+
+        let html = '';
+        for (const orderId in grouped) {
+          const items = grouped[orderId];
+          const { total, created_at } = items[0];
+          html += `<div class="order-item">
+            <b>Order #${orderId}</b> | ₹${total} | ${new Date(created_at).toLocaleString()}
+            <ul>${items.map(i => `<li>${i.product_name} x ${i.quantity} @ ₹${i.price}</li>`).join('')}</ul>
+          </div>`;
+        }
+
+        document.getElementById('orderHistory').innerHTML = html;
+      });
+    }
+    function loadProducts(page = 1) {
+  const name = document.getElementById('searchName').value;
+  const category = document.getElementById('searchCategory').value;
+  const sort = document.getElementById('sortSelect')?.value || '';
+  let url = `/api/products?page=${page}`;
+
+  const params = [];
+  if (name) params.push(`name=${encodeURIComponent(name)}`);
+  if (category) params.push(`category=${encodeURIComponent(category)}`);
+  if (sort) params.push(`sort=${sort}`);
+  if (params.length) url += '&' + params.join('&');
+
+  fetch(url)
+    .then(res => res.json())
+    .then(data => {
+      const list = data.products.map(p => `
+        <div class="card p-3 mb-2">
+          <b>${p.name}</b><br>
+          ${p.description}<br>
+          ₹${p.price} | ${p.category} | Stock: ${p.stock}<br>
+          <input type="number" id="qty-${p.id}" value="1" min="1" class="form-control w-25 d-inline-block" />
+          <button class="btn btn-sm btn-outline-success" onclick="addToCart(${p.id})">Add to Cart</button>
+          
+          ${role === 'admin' ? `
+            <br>
+            <button class="btn btn-sm btn-warning mt-1" onclick="editProduct(${p.id}, '${p.name}', '${p.description}', ${p.price}, '${p.category}', ${p.stock})">Edit</button>
+            <button class="btn btn-sm btn-danger mt-1" onclick="deleteProduct(${p.id})">Delete</button>
+          ` : ''}
+        </div>
+      `).join('');
+
+      document.getElementById('productList').innerHTML = list || 'No products found.';
+    });
+}
+function addToCart(productId) {
+  const qty = document.getElementById(`qty-${productId}`).value;
+
+  if (!token) {
+    alert("Please login first to add items to cart.");
+    return;
+  }
+
+  fetch('/api/cart/add', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token
+    },
+    body: JSON.stringify({ product_id: productId, quantity: qty })
+  }).then(res => res.text()).then(alert);
+}
+
+    // Auto-show admin panel if token + role found
+    if (token && role === 'admin') {
+      document.getElementById('adminPanel').style.display = 'block';
+    }
+  </script>
+</body>
+</html>
